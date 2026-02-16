@@ -1,0 +1,16 @@
+- name: Manual
+  href: manual/
+- name: Scripting API
+  href: api/
+- name: Changelog
+  href: changelog/index.html
+- name: License
+  href: license/index.html
+- name: Contact
+  href: contact/index.html
+- name: GitHub
+  href: https://github.com/Kaiju-Solutions/Kaiju-Agents
+- name: Behavior
+  href: https://behavior.kaijusolutions.ca
+- name: Utility AI
+  href: https://utility.kaijusolutions.ca

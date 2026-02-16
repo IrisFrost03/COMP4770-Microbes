@@ -1,0 +1,7 @@
+﻿<Solution>
+  <Project Path="com.kaijusolutions.agents.csproj" />
+  <Project Path="com.kaijusolutions.agents.samples.movement.csproj" />
+  <Project Path="com.kaijusolutions.agents.exercises.microbes.csproj" />
+  <Project Path="com.kaijusolutions.agents.editor.csproj" />
+  <Project Path="com.kaijusolutions.agents.samples.keyboard.csproj" />
+</Solution>

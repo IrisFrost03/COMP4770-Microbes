@@ -1,0 +1,539 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
+using System.Linq;
+using KaijuSolutions.Agents.Extensions;
+using KaijuSolutions.Agents.Movement;
+using UnityEngine;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
+namespace KaijuSolutions.Agents.Sensors
+{
+    /// <summary>
+    /// <see cref="KaijuSensor"/> to perform ray or sphere casts. This will cast from this <see href="https://docs.unity3d.com/Manual/class-transform.html">transform</see> in the forward direction of this <see href="https://docs.unity3d.com/Manual/class-transform.html">transform</see>.
+    /// </summary>
+    [DefaultExecutionOrder(int.MinValue)]
+#if UNITY_EDITOR
+    [AddComponentMenu("Kaiju Solutions/Agents/Sensors/Kaiju Cast Sensor", 6)]
+    [Icon("Packages/com.kaijusolutions.agents/Editor/Icon.png")]
+    [HelpURL("https://agents.kaijusolutions.ca/manual/sensors.html#cast-sensor")]
+#endif
+    public class KaijuCastSensor : KaijuSensor
+    {
+        /// <summary>
+        /// How far to cast.
+        /// </summary>
+        public float Distance
+        {
+            get => distance;
+            set => distance = Mathf.Max(value, float.Epsilon);
+        }
+        
+        /// <summary>
+        /// How far to cast.
+        /// </summary>
+#if UNITY_EDITOR
+        [Header("Area")]
+        [Tooltip("How far to cast.")]
+#endif
+        [Min(float.Epsilon)]
+        [SerializeField]
+        private float distance = 10;
+        
+        /// <summary>
+        /// What angle to cast along.
+        /// </summary>
+        public float Angle
+        {
+            get => angle;
+            set => angle = Mathf.Clamp(value, 0, 360f);
+        }
+        
+        /// <summary>
+        /// What angle to cast along.
+        /// </summary>
+#if UNITY_EDITOR
+        [Tooltip("What angle to cast along.")]
+#endif
+        [Range(0, 360)]
+        [SerializeField]
+        private float angle = 180;
+        
+        /// <summary>
+        /// The number of casts to make. These will be evenly distributed across the <see cref="angle"/>, unless there is only one cast in which case it will cast directly forward.
+        /// </summary>
+        public int Casts
+        {
+            get => casts;
+            set
+            {
+                if (value == casts)
+                {
+                    return;
+                }
+                
+                casts = Mathf.Max(value, 1);
+#if UNITY_EDITOR
+                if (!Application.isPlaying)
+                {
+                    return;
+                }
+#endif
+                Cleanup();
+            }
+        }
+        
+        /// <summary>
+        /// The number of casts to make. These will be evenly distributed across the <see cref="angle"/>, unless there is only one cast in which case it will cast directly forward.
+        /// </summary>
+#if UNITY_EDITOR
+        [Header("Casting")]
+        [Tooltip("What angle to cast along. These will be evenly distributed across the angle, unless there is only one cast in which case it will cast directly forward.")]
+#endif
+        [Min(1)]
+        [SerializeField]
+        private int casts = 5;
+        
+        /// <summary>
+        /// The radius of the casts.
+        /// </summary>
+        public float Radius
+        {
+            get => radius;
+            set => radius = Mathf.Max(value, 0);
+        }
+        
+        /// <summary>
+        /// The radius of the casts.
+        /// </summary>
+#if UNITY_EDITOR
+        [Tooltip("The radius of the casts.")]
+#endif
+        [Min(0)]
+        [SerializeField]
+        private float radius;
+        
+        /// <summary>
+        /// What layers to collide with on the casts.
+        /// </summary>
+#if UNITY_EDITOR
+        [Tooltip("What layers to collide with on the casts.")]
+#endif
+        public LayerMask mask = KaijuMovementConfiguration.DefaultMask;
+        
+        /// <summary>
+        /// How casts should handle hitting triggers.
+        /// </summary>
+#if UNITY_EDITOR
+        [Tooltip("How casts should handle hitting triggers.")]
+#endif
+        public QueryTriggerInteraction triggers = QueryTriggerInteraction.UseGlobal;
+#if UNITY_EDITOR
+        /// <summary>
+        /// The visualizations color for hits in the editor.
+        /// </summary>
+        [Header("Visualizations")]
+        [Tooltip("The visualizations color for hits in the editor.")]
+        public Color editorHit = Color.red;
+        
+        /// <summary>
+        /// The visualizations color for misses in the editor.
+        /// </summary>
+        [Tooltip("The visualizations color for misses in the editor.")]
+        public Color editorMiss = Color.green;
+#endif
+        /// <summary>
+        /// If at least one ray has hit something.
+        /// </summary>
+        public bool HasHits
+        {
+            get
+            {
+                for (int i = 0; i < _hits.Length; i++)
+                {
+                    if (_hits[i] != null)
+                    {
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+        }
+        
+        /// <summary>
+        /// The total number of casts which hit something.
+        /// </summary>
+        public int HitsTotal
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < _hits.Length; i++)
+                {
+                    if (_hits[i] != null)
+                    {
+                        count++;
+                    }
+                }
+                
+                return count;
+            }
+        }
+        
+        /// <summary>
+        /// The data from left to right of what the rays have hit, with NULL entries being rays that did not hit.
+        /// </summary>
+        public IReadOnlyList<RaycastHit?> Hits => _hits;
+        
+        /// <summary>
+        /// Get transforms for the <see cref="Hits"/>. Misses will be NULL.
+        /// </summary>
+        public IEnumerable<Transform> Transforms => _hits.Select(x => x?.transform);
+        
+        /// <summary>
+        /// The <see cref="Hits"/> data only for points which hit, removing all NULL entries.
+        /// </summary>
+        public IEnumerable<RaycastHit?> ConnectedHits => _hits.Where(x => x != null);
+        
+        /// <summary>
+        /// et transforms for the <see cref="ConnectedHits"/>.
+        /// </summary>
+        public IEnumerable<Transform> ConnectedTransforms => ConnectedHits.Select(x => x!.Value.transform);
+        
+        /// <summary>
+        /// The nearest <see cref="ConnectedTransforms"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="nearest">The distance to the nearest <see cref="ConnectedTransforms"/> instance.</param>
+        /// <param name="normalize">If the distance should be normalized between [-1, 1].</param>
+        /// <returns>The nearest <see cref="ConnectedTransforms"/> instance. Will be NULL if the <see cref="ConnectedTransforms"/> list is empty.</returns>
+        public Transform Nearest(out float nearest, bool normalize = false)
+        {
+            if (!Agent)
+            {
+                nearest = normalize ? 1 : float.MaxValue;
+                return null;
+            }
+            
+            Transform target = Agent.Nearest(ConnectedTransforms, out nearest);
+            if (normalize)
+            {
+                nearest = nearest.Normalize(distance);
+            }
+            
+            return target;
+        }
+        
+        /// <summary>
+        /// The nearest <see cref="ConnectedTransforms"/> instance across all axes to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="nearest">The distance to the nearest <see cref="ConnectedTransforms"/> instance.</param>
+        /// <param name="normalize">If the distance should be normalized between [-1, 1].</param>
+        /// <returns>The nearest <see cref="ConnectedTransforms"/> instance. Will be NULL if the <see cref="ConnectedTransforms"/> list is empty.</returns>
+        public Transform Nearest3(out float nearest, bool normalize = false)
+        {
+            if (!Agent)
+            {
+                nearest = normalize ? 1 : float.MaxValue;
+                return null;
+            }
+            
+            Transform target = Agent.Nearest3(ConnectedTransforms, out nearest);
+            if (normalize)
+            {
+                nearest = nearest.Normalize(distance);
+            }
+            
+            return target;
+        }
+        
+        /// <summary>
+        /// The farthest <see cref="ConnectedTransforms"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="farthest">The distance to the farthest <see cref="ConnectedTransforms"/> instance.</param>
+        /// <param name="normalize">If the distance should be normalized between [-1, 1].</param>
+        /// <returns>The farthest <see cref="ConnectedTransforms"/> instance. Will be NULL if the <see cref="ConnectedTransforms"/> list is empty.</returns>
+        public Transform Farthest(out float farthest, bool normalize = false)
+        {
+            if (!Agent)
+            {
+                farthest = 0;
+                return null;
+            }
+            
+            Transform target = Agent.Farthest(ConnectedTransforms, out farthest);
+            if (normalize)
+            {
+                farthest = farthest.Normalize(distance);
+            }
+            
+            return target;
+        }
+        
+        /// <summary>
+        /// The farthest <see cref="ConnectedTransforms"/> instance across all axes to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="farthest">The distance to the farthest <see cref="ConnectedTransforms"/> instance.</param>
+        /// <param name="normalize">If the distance should be normalized between [-1, 1].</param>
+        /// <returns>The farthest <see cref="ConnectedTransforms"/> instance. Will be NULL if the <see cref="ConnectedTransforms"/> list is empty.</returns>
+        public Transform Farthest3(out float farthest, bool normalize = false)
+        {
+            if (!Agent)
+            {
+                farthest = 0;
+                return null;
+            }
+            
+            Transform target = Agent.Farthest3(ConnectedTransforms, out farthest);
+            if (normalize)
+            {
+                farthest = farthest.Normalize(distance);
+            }
+            
+            return target;
+        }
+        
+        /// <summary>
+        /// The nearest <see cref="Positions"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="normalize">If the positions should be normalized between [-1, 1].</param>
+        /// <returns>The nearest <see cref="Positions"/> instance. Will be a zero vector if the <see cref="Positions"/> list is empty.</returns>
+        public Vector2 NearestPosition(bool normalize = false)
+        {
+            Vector2 positon = Agent.Position;
+            Vector2 value = Agent.Position.Nearest(Positions(), out float _);
+            return normalize ? value.Normalize(positon, Agent.Forward, distance) : value;
+        }
+        
+        /// <summary>
+        /// The nearest <see cref="Positions"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="normalize">If the positions should be normalized between [-1, 1].</param>
+        /// <returns>The nearest <see cref="Positions"/> instance. Will be a zero vector if the <see cref="Positions"/> list is empty.</returns>
+        public Vector3 NearestPosition3(bool normalize = false)
+        {
+            Vector3 positon = Agent.Position3;
+            Vector3 value = Agent.Position.Nearest3(Positions3(), out float _);
+            return normalize ? value.Normalize(positon, Agent.Forward3, distance) : value;
+        }
+        
+        /// <summary>
+        /// The farthest <see cref="Positions"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="normalize">If the positions should be normalized between [-1, 1].</param>
+        /// <returns>The farthest <see cref="Positions"/> instance. Will be a zero vector if the <see cref="Positions"/> list is empty.</returns>
+        public Vector2 FarthestPosition(bool normalize = false)
+        {
+            Vector2 positon = Agent.Position;
+            Vector2 value = Agent.Position.Farthest(Positions(), out float _);
+            return normalize ? value.Normalize(positon, Agent.Forward, distance) : value;
+        }
+        
+        /// <summary>
+        /// The farthest <see cref="Positions"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="normalize">If the positions should be normalized between [-1, 1].</param>
+        /// <returns>The farthest <see cref="Positions"/> instance. Will be a zero vector if the <see cref="Positions"/> list is empty.</returns>
+        public Vector3 FarthestPosition3(bool normalize = false)
+        {
+            Vector3 positon = Agent.Position3;
+            Vector3 value = Agent.Position.Farthest3(Positions3(), out float _);
+            return normalize ? value.Normalize(positon, Agent.Forward3, distance) : value;
+        }
+        
+        /// <summary>
+        /// The nearest <see cref="Distances"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="normalize">If the distance should be normalized between [0, 1].</param>
+        /// <returns>The nearest <see cref="Distances"/> instance.</returns>
+        public float NearestDistance(bool normalize = false)
+        {
+            float value = Distances().Min();
+            return normalize ? value.Normalize(distance, 0) : value;
+        }
+        
+        /// <summary>
+        /// The farthest <see cref="Distances"/> instance to the <see cref="KaijuSensor.Agent"/>.
+        /// </summary>
+        /// <param name="normalize">If the distance should be normalized between [0, 1].</param>
+        /// <returns>The farthest <see cref="Distances"/> instance.</returns>
+        public float FarthestDistance(bool normalize = false)
+        {
+            float value = Distances().Max();
+            return normalize ? value.Normalize(distance, 0) : value;
+        }
+        
+        /// <summary>
+        /// The data from left to right of what the rays have hit, with NULL entries being rays that did not hit.
+        /// </summary>
+        private RaycastHit?[] _hits = Array.Empty<RaycastHit?>();
+        
+        /// <summary>
+        /// The positions corresponding to the <see cref="Hits"/>, with <see cref="Hits"/> that missed being set to the maximum casting distance.
+        /// </summary>
+        /// <param name="normalize">If positions should be normalized between [-1, 1].</param>
+        public IEnumerable<Vector2> Positions(bool normalize = false)
+        {
+            if (!Agent)
+            {
+                yield break;
+            }
+            
+            IEnumerable<Vector2> positions = _positions.Select(x => x.Flatten());
+            if (normalize)
+            {
+                Vector2 position = Agent;
+                Vector2 forward = Agent.Forward;
+                foreach (Vector2 value in positions)
+                {
+                    yield return value.Normalize(position, forward, distance);
+                }
+            }
+            else
+            {
+                foreach (Vector2 value in positions)
+                {
+                    yield return value;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// The positions corresponding to the <see cref="Hits"/>, with <see cref="Hits"/> that missed being set to the maximum casting distance.
+        /// </summary>
+        /// <param name="normalize">If positions should be normalized between [-1, 1].</param>
+        public IEnumerable<Vector3> Positions3(bool normalize = false)
+        {
+            if (!Agent)
+            {
+                yield break;
+            }
+            
+            if (normalize)
+            {
+                Vector3 position = Agent;
+                Vector3 forward = Agent.Forward3;
+                foreach (Vector3 value in _positions)
+                {
+                    yield return value.Normalize(position, forward, distance);
+                }
+            }
+            else
+            {
+                foreach (Vector3 value in _positions)
+                {
+                    yield return value;
+                }
+            }
+        }
+        
+        /// <summary>
+        /// Get the distances of all rays.
+        /// </summary>
+        /// <param name="normalize">If distances should be normalized between [0, 1].</param>
+        /// <returns>The distances of all rays.</returns>
+        public IEnumerable<float> Distances(bool normalize = false)
+        {
+            if (!Agent)
+            {
+                yield break;
+            }
+            
+            Vector2 position = Agent;
+            foreach (Vector2 value in _positions.Select(x => x.Flatten()))
+            {
+                yield return normalize ? value.Distance(position).Normalize(distance, 0) : value.Distance(position);
+            }
+        }
+        
+        /// <summary>
+        /// The positions corresponding to the <see cref="Hits"/>, with <see cref="Hits"/> that missed being set to the maximum casting distance.
+        /// </summary>
+        private Vector3[] _positions = Array.Empty<Vector3>();
+        
+        /// <summary>
+        /// Run the <see cref="KaijuSensor"/>.
+        /// </summary>
+        protected override void Run()
+        {
+            Transform t = transform;
+            Vector3 p = t.position;
+            Vector3 f = t.forward;
+            p.ArcSphereCast(f, radius, _hits, angle, distance, mask, triggers);
+            p.ExtractPoints(f, _hits, _positions, angle, distance);
+        }
+        
+        /// <summary>
+        /// Perform any needed resetting of the <see cref="KaijuSensor"/>.
+        /// </summary>
+        protected override void Cleanup()
+        {
+            // With no angle, we can only do a single cast.
+            if (angle <= 0)
+            {
+                casts = 1;
+            }
+            
+            // Ensure we can fit the size of the casts.
+            Array.Resize(ref _hits, casts);
+            Array.Resize(ref _positions, casts);
+        }
+#if UNITY_EDITOR
+        /// <summary>
+        /// Editor-only function that Unity calls when the script is loaded or a value changes in the Inspector.
+        /// </summary>
+        private void OnValidate()
+        {
+            // When playing, ensure the arrays are the proper size.
+            if (Application.isPlaying)
+            {
+                Cleanup();
+            }
+        }
+        
+        /// <summary>
+        /// Allow for visualizing in the editor.
+        /// <param name="position">The position of the <see cref="KaijuSensor.Agent"/>.</param>
+        /// </summary>
+        public override void EditorVisualize(Vector3 position)
+        {
+            Vector3 p = Position3;
+            for (int i = 0; i < _hits.Length; i++)
+            {
+                Handles.color = _hits[i].HasValue ? editorHit : editorMiss;
+                Handles.DrawLine(p, _positions[i]);
+            }
+        }
+#endif
+        /// <summary>
+        /// Get a description of the object.
+        /// </summary>
+        /// <returns>A description of the object.</returns>
+        public override string ToString()
+        {
+            return $"Kaiju Casts Sensor {name} - Agent: {(Agent ? Agent.name : "None")} - Distance: {Distance} - Angle: {Angle} - Casts: {Casts} - Radius: {Radius}";
+        }
+        
+        /// <summary>
+        /// Implicit conversion from a <see href="https://docs.unity3d.com/Manual/class-GameObject.html">GameObject</see>.
+        /// </summary>
+        /// <param name="o">The <see href="https://docs.unity3d.com/Manual/class-GameObject.html">GameObject</see>.</param>
+        /// <returns>The <see cref="KaijuAgentsVisionSensor"/> attached to the <see href="https://docs.unity3d.com/Manual/class-GameObject.html">GameObject</see> if there was one.</returns>
+        public static implicit operator KaijuCastSensor([NotNull] GameObject o) => o.GetComponent<KaijuCastSensor>();
+        
+        /// <summary>
+        /// Implicit conversion from a <see href="https://docs.unity3d.com/Manual/class-transform.html">transform</see>.
+        /// </summary>
+        /// <param name="t">The <see href="https://docs.unity3d.com/Manual/class-transform.html">transform</see>.</param>
+        /// <returns>The <see cref="KaijuAgentsVisionSensor"/> attached to the <see href="https://docs.unity3d.com/Manual/class-transform.html">transform</see> if there was one.</returns>
+        public static implicit operator KaijuCastSensor([NotNull] Transform t) => t.GetComponent<KaijuCastSensor>();
+        
+        /// <summary>
+        /// Implicit conversion to a <see cref="KaijuAgent"/>.
+        /// </summary>
+        /// <param name="s">The <see cref="KaijuAgentsVisionSensor"/>.</param>
+        /// <returns>The <see cref="KaijuAgent"/> attached to the <see cref="KaijuAgentsVisionSensor"/> if there was one.</returns>
+        public static implicit operator KaijuAgent([NotNull] KaijuCastSensor s) => s.Agent;
+    }
+}

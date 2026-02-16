@@ -1,0 +1,31 @@
+items:
+- name: Getting Started
+  href: getting-started.md
+- name: Components
+  href: components.md
+  items:
+    - name: Agents
+      href: agents.md
+    - name: Sensors
+      href: sensors.md
+    - name: Actuators
+      href: actuators.md
+    - name: Controllers
+      href: controllers.md
+    - name: Manager
+      href: manager.md
+    - name: Developer UI
+      href: developer-ui.md
+- name: Movement
+  href: movement.md
+- name: Extensions
+  href: extensions.md
+- name: Samples and Exercises
+  href: samples-and-exercises.md
+  items:
+    - name: Cleaner
+      href: cleaner.md
+    - name: Microbes
+      href: microbes.md
+    - name: Capture the Flag
+      href: capture-the-flag.md
