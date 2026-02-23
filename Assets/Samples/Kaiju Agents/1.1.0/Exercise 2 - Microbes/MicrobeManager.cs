@@ -165,10 +165,10 @@ namespace KaijuSolutions.Agents.Exercises.Microbes
         [Tooltip("The energy level to spawn new microbes at.")]
         [Min(float.Epsilon)]
         [SerializeField]
-        private float energy = 100;
-        
+        private float energy = Random.Range(50f, 100f);
+
         /// <summary>
-        /// The time in seconds <see cref="Microbe"/>s need to wait before they can <see cref="Microbe.Mate"/> again.
+        /// The time in seconds <see cref="SMicrobe"/>s need to wait before they can <see cref="Microbe.Mate"/> again.
         /// </summary>
         public static float Cooldown
         {
@@ -232,7 +232,7 @@ namespace KaijuSolutions.Agents.Exercises.Microbes
         [Tooltip("How many seconds between energy pickup spawns.")]
         [Min(0)]
         [SerializeField]
-        private float energyRate = 5;
+        private float energyRate = 3;
         
         /// <summary>
         /// The range in each axis to spawn within.

@@ -24,15 +24,16 @@ namespace KaijuSolutions.Agents.Exercises.Microbes {
         [HideInInspector]
         [SerializeField]
         private Microbe microbe;
+        private float lastActionTime = 0f;  // Tracker in case microbes get stuck
 
         /// <summary>
         /// Called after the <see cref="microbe"/> has mated.
         /// </summary>
         /// <param name="mate">The <see cref="Microbe"/> this mated with.</param>
         private void OnMate(Microbe mate) {
-            Debug.Log($"{name} mated with {mate.name}!", this);
+            
         }
-
+        
         /// <summary>
         /// Called after the <see cref="microbe"/> has eaten.
         /// </summary>
@@ -58,23 +59,26 @@ namespace KaijuSolutions.Agents.Exercises.Microbes {
                 return;
             }
 
-            Transform nearestMicrobe = Position.Nearest(microbeSensor.Observed, out float distance);
-            Microbe targetMicrobe = nearestMicrobe.GetComponent<Microbe>();
+            Transform nearestMicrobe = Position.Nearest(microbeSensor.Observed, out float distance);    //Log the nearest microbe and distance to it
+            Microbe targetMicrobe = nearestMicrobe.GetComponent<Microbe>(); //Mark the nearest microbe as the target microbe
 
-            if (targetMicrobe == null) {
+            if (targetMicrobe == null) {    //Check to see if the target microbe exists
                 return;
             }
 
-            if (microbe.Compatible(targetMicrobe)) {
-                if (microbe.OnCooldown == false && targetMicrobe.OnCooldown == false) {
-                    Agent.Seek(nearestMicrobe, 0.25f);
+            if (microbe.Compatible(targetMicrobe)) { // If microbe are compatible
+                if (microbe.OnCooldown == false && targetMicrobe.OnCooldown == false) { // Check if both microbes are off mating cooldown
+                    Agent.Seek(nearestMicrobe, 0.25f);  //Seek
+                    lastActionTime = Time.time;     //Set time of last action to now
                 }
             }
-            else if (microbe.Energy > targetMicrobe.Energy) {
-                Agent.Pursue(nearestMicrobe, 0.25f);
+            else if (microbe.Energy > targetMicrobe.Energy) {   //If im stronger
+                Agent.Pursue(nearestMicrobe, 0.25f);    //Pursue! Get em!
+                lastActionTime = Time.time; //Set time of last action to now
             }
-            else if (microbe.Energy < targetMicrobe.Energy) {
-                Agent.Flee(nearestMicrobe, 1f);
+            else if (microbe.Energy < targetMicrobe.Energy) {   //If im weaker
+                Agent.Flee(nearestMicrobe, 1f); //RUN
+                lastActionTime = Time.time; //Set time of last action to now
             }
         }
 
@@ -82,13 +86,23 @@ namespace KaijuSolutions.Agents.Exercises.Microbes {
         /// Called when a <see cref="EnergyVisionSensor"/> has been run.
         /// </summary>
         /// <param name="energySensor">The <see cref="EnergyVisionSensor"/> which was run.</param>
-        private void OnEnergySensor(EnergyVisionSensor energySensor) {
+        private void OnEnergySensor(EnergyVisionSensor energySensor) {  //When I see something on the energy sensor
             if (energySensor.Observed.Count < 1) {
                 return;
             }
 
-            Transform nearestEnergy = Position.Nearest(energySensor.Observed, out float distance);
-            Agent.Seek(nearestEnergy, 0.25f);
+            Transform nearestEnergy = Position.Nearest(energySensor.Observed, out float distance);  // Mark the nearest energy pickup and distance to it
+            Agent.Seek(nearestEnergy, 0.25f);   //Go get that energy
+            lastActionTime = Time.time; //Set time of last action to now
+        }
+
+        private void Update() { // Custom function, fixes the freezing microbe problem
+            
+            if (Time.time - lastActionTime > 3f) {  //If it's been more than 3 seconds since the last action
+                Agent.Wander(); //Start wandering again
+                Agent.ObstacleAvoidance(clear: false);  
+                lastActionTime = Time.time; //Set time of last action to now
+            }
         }
 
         /// <summary>
@@ -154,3 +168,13 @@ namespace KaijuSolutions.Agents.Exercises.Microbes {
         }
     }
 }
+
+
+
+
+
+///////////////////////////GIT COMMANDS/////////////////////////////
+//git add .
+//git commit -m "Fixed freezing bug and added presentation slides"
+//git push
+////////////////////////////////////////////////////////////////////
